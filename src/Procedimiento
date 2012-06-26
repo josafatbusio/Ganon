@@ -1,0 +1,1306 @@
+--PROCEDURE XXBOL_AR_TRANSACTIONS_PRC
+--ALTER SESSION SET NLS_LANGUAGE = 'Latin American Spanish';
+
+DECLARE
+
+TYPE error_rec_type IS RECORD (
+    linea                 number,
+    articulo              varchar2(500),
+    msg_error             varchar2(32767)
+);
+
+TYPE error_type IS TABLE OF error_rec_type
+INDEX BY BINARY_INTEGER;
+
+TYPE trx_rec_type IS RECORD (
+trx_number                 varchar2(500),
+msg_error                  varchar2(32767)
+);
+
+TYPE trx_tbl_type IS TABLE OF trx_rec_type
+INDEX BY BINARY_INTEGER;
+
+TYPE trx_rec_type_ok IS RECORD (
+trx_number                 varchar2(500),
+comentarios                  varchar2(32767)
+);
+
+TYPE trx_tbl_type_ok IS TABLE OF trx_rec_type_ok
+INDEX BY BINARY_INTEGER;
+
+retcode   number;
+trx_tabla_err           trx_tbl_type;
+trx_tabla_ok            trx_tbl_type_ok;
+p_msg_count             number;
+p_msg_data              varchar2(2000);
+o_trx_header_tbl        ar_invoice_api_pub.trx_header_tbl_type;
+o_trx_lines_tbl         ar_invoice_api_pub.trx_line_tbl_type;
+p_trx_dist_tbl          ar_invoice_api_pub.trx_dist_tbl_type;
+p_trx_salescredits_tbl  ar_invoice_api_pub.trx_salescredits_tbl_type;
+o_batch_source_rec      ar_invoice_api_pub.batch_source_rec_type;
+p_trx_contingencies_tbl ar_invoice_api_pub.trx_contingencies_tbl_type;
+l_cnt number := 0;
+l_customer_trx_id       number;
+l_return_status         varchar2(80);
+v_org_id number;
+
+cursor c_type (P_TYPE VARCHAR2, P_ORGANIZATION_ID  NUMBER, p_almacen varchar2) is
+
+/*
+Agregar atribute1 para identificar por tienda/organizacion inventarios
+*/
+select cust_trx_type_id,
+        attribute2 batch_source_id
+  from ra_cust_trx_types_all
+  where ATTRIBUTE1 = P_ORGANIZATION_ID
+          and attribute3 = p_almacen
+          --name = 'VTA MOST FACT T PINO';
+          and TYPE = P_TYPE;
+
+reg_type c_type %rowtype;
+
+cursor c_origen (p_org_id number, p_serie number) is
+/*
+Agregar atribute 1 para identificar por unidad operativa
+*/
+select bs.batch_source_id
+  FROM ra_batch_sources_all bs
+  where bs.name = p_serie--'CRESCENDO VENTAS DCH'
+          and bs.org_id = p_org_id;
+
+reg_origen c_origen%rowtype;
+
+CURSOR c_cliente (p_org_id number, p_cliente_crescendo varchar2, p_cliente_oracle varchar2)
+is
+SELECT hp.party_number, hp.party_name,
+        hp.orig_system_reference orig_system_reference_c,
+        ca.cust_account_id orig_system_bill_customer_id,
+        ca.orig_system_reference orig_system_reference_ca,
+        cas.cust_acct_site_id orig_system_bill_address_id,
+        cas.orig_system_reference orig_system_reference_a,
+        ps.orig_system_reference orig_system_reference_ps,
+        ps.party_site_number, csu.site_use_code, csu.payment_term_id,
+        trm.term_id,
+        trm.NAME term_name
+  FROM hz_parties hp,
+          hz_cust_accounts ca,
+          hz_cust_acct_sites_all cas,
+          hz_party_sites ps,
+          hz_cust_site_uses_all csu,
+          ra_terms_tl trm
+  WHERE hp.party_id = ca.party_id
+          AND
+          cas.cust_account_id = ca.cust_account_id
+          AND
+          cas.party_site_id = ps.party_site_id
+          AND
+          cas.cust_acct_site_id = csu.cust_acct_site_id
+          AND csu.site_use_code = 'BILL_TO'
+          AND csu.status = 'A'
+          AND
+          trm.term_id =
+                  NVL (csu.payment_term_id,
+                          (SELECT tt.term_id
+                            FROM ra_terms_tl tt
+                            WHERE tt.NAME = 'CONTADO'
+                                    AND tt.LANGUAGE = 'ESA')
+                          )
+          AND trm.LANGUAGE = 'ESA'
+          and cas.org_id = csu.org_id
+          and csu.org_id = p_org_id
+          AND
+          (
+                  (
+                          p_cliente_crescendo is not null
+                                  and
+                                  upper(trim(hp.ORGANIZATION_NAME_PHONETIC)) =
+                                          upper(trim(p_cliente_crescendo))
+                          )
+                          or
+                          (
+                                  p_cliente_oracle is not null
+                                          and
+                                          ltrim(trim(ca.account_number),'0') =
+                                                  ltrim(trim(p_cliente_oracle),'0')
+                                  )
+                  );
+--and ca.cust_account_id = p_bill_id
+--and cas.cust_acct_site_id = p_addr_id;
+
+reg_cliente c_cliente%rowtype;
+
+
+cursor c_libro (p_org_code varchar2) is
+/*ç
+agregar parametro para organizacion de inventarios
+*/
+
+select hroi.organization_id,
+        hroi.org_information1 gl_id,
+        hroi.org_information3 UO , hraou.name
+  from hr_all_organization_units hraou,
+          hr_organization_information hroi
+  where hraou.organization_id               = hroi.organization_id
+          and
+          hroi.org_information_context    = 'Accounting Information'
+          and
+          exists (
+            select 1
+            from mtl_parameters mp
+            where mp.organization_id = hroi.organization_id
+                    and
+                    mp.organization_code = p_org_code
+                  );
+--   and     hraou.name = '003_TIENDA URUGUAY';
+
+reg_libro c_libro%rowtype;
+
+cursor c_memoline (p_org_id number) is
+
+select t.MEMO_LINE_ID
+  FROM ar_memo_lines_ALL_tl t
+  WHERE t.LANGUAGE = 'ESA'
+          AND
+          upper(t.name) =upper('Ventas Mostrador')
+          and t.org_id = p_org_id;
+
+reg_memoline c_memoline%rowtype;
+CURSOR c_erro_c
+IS
+SELECT *
+  FROM ar_trx_errors_gt ate;
+--WHERE ate.trx_header_id = p_head_id;
+
+CURSOR carticulo (
+in_item_code           mtl_system_items_b.segment1%TYPE,
+in_organization_code   mtl_parameters.organization_code%TYPE
+)
+IS
+
+SELECT distinct si.inventory_item_id, si.tax_code, si.description, Si.segment1,
+        si.organization_id, si.primary_unit_of_measure, rt.percentage_rate
+  FROM mtl_system_items_b si,
+          zx_rates_b rt,
+          zx_rates_tl rtt,
+          (SELECT mp.organization_id
+            FROM mtl_parameters mp
+            WHERE mp.organization_code = in_organization_code) og
+  WHERE si.organization_id = og.organization_id
+          AND
+          si.tax_code = rt.tax_rate_code(+)
+          AND
+          rtt.tax_rate_id(+) = rt.tax_rate_id
+          AND si.segment1 = in_item_code
+          AND rtt.LANGUAGE(+) = 'ESA';
+
+reg_articulo carticulo%rowtype;
+
+cursor c_uom ( p_unidad varchar2) is
+select uom.uom_code
+  from MTL_UNITS_OF_MEASURE_VL uom
+  where uom.unit_of_measure = p_unidad;
+
+cursor c_term (p_name varchar2) is
+select trm.TERM_ID
+  from ra_terms_tl trm
+  where trm.NAME = p_name
+          and trm.LANGUAGE = 'ESA';
+
+reg_term c_term%rowtype;
+
+CURSOR C_trx (P_trx_number VARCHAR2, P_ADDR_ID NUMBER, P_BILL_ID NUMBER) IS
+select DISTINCT trx.customer_trx_id
+  from ra_customer_trx_all trx
+  where trx.trx_number = P_trx_number
+          and
+          TRX.BILL_TO_CUSTOMER_ID = P_BILL_ID
+          AND BILL_TO_ADDRESS_ID = P_ADDR_ID;
+
+CURSOR C_trx_number (P_ID NUMBER) IS
+select DISTINCT trx.trx_number
+  from ra_customer_trx_all trx
+  where trx.customer_trx_id=p_id;
+
+cursor C_trx_exists (p_trx_number ra_customer_trx_all.trx_number%type ,
+p_orig_system_bill_address_id ra_customer_trx_all.BILL_TO_ADDRESS_ID %type,
+p_orig_system_bill_customer_id ra_customer_trx_all.BILL_TO_CUSTOMER_ID%type,
+p_cust_trx_type_id ra_customer_trx_all.cust_trx_type_id%type,
+p_batch_source_id ra_customer_trx_all.batch_source_id%type
+)
+is
+select 1
+  from ra_customer_trx_all trx
+  where trx.interface_header_attribute1 = p_trx_number
+          and
+          trx.BILL_TO_ADDRESS_ID = p_orig_system_bill_address_id
+          and
+          trx.BILL_TO_CUSTOMER_ID = p_orig_system_bill_customer_id
+          --and trx.CUST_TRX_TYPE_ID = p_cust_trx_type_id
+          and
+          trx.BATCH_SOURCE_ID = p_batch_source_id;
+
+reg_exists c_trx_exists%rowtype;
+
+v_trx_number_new        ra_customer_trx_all.trx_number%type;
+
+v_header_id             number;
+v_line_id               number;
+--v_line                  number:=0;
+v_quantity              number:=70;
+
+v_FILE_AR               SYS.UTL_FILE.file_type;
+V_LINE                  VARCHAR2(5000);
+v_rec_no                number:=0;
+v_path                  varchar2(1000):='INCRS_TOP';
+v_substr                varchar2(5000);
+v_trx_number            ra_customer_trx_all.trx_number%type;
+v_organization_code     mtl_parameters.organization_code%type;
+v_corte                 number;
+v_tipo_trx              varchar2(3);
+v_cliente_mostrador     varchar2(2);
+v_bill_customer_id      number;
+v_bill_address_id       number;
+v_cliente_crescendo     varchar2(100);
+v_cliente_oracle        varchar2(100);
+v_trx_number_app        ra_customer_trx_all.trx_number%type;
+v_line_trx_app          number;
+v_line_trx              number;
+v_articulo              mtl_system_items_b.segment1%type;
+v_uom                   varchar2(180);
+v_cantidad              number;
+v_importe               number;
+v_unit_selling_price    number;
+v_payment_term          ra_terms_tl.term_id%type;
+
+v_trx_number_old        ra_customer_trx_all.trx_number%type;
+v_tipo_trx_old          varchar2(3);
+v_trx_number_app_old    ra_customer_trx_all.trx_number%type;
+v_importe_app_old       number:=0;
+
+v_linea                 number:=0;
+v_cabeza                number:=0;
+v_tax_code              varchar2(150);
+v_currency              varchar2(3);
+v_exchange_rate_type    VARCHAR2(60);
+v_exchange_date         DATE;
+v_exchange_rate         Number;
+
+v_errbuf                varchar2(1000);
+v_retcode   number:=0;
+
+v_customer_trx_id_inv   number;
+
+v_importe_app       number:=0;
+
+v_exit              number:=0;
+v_errores_gral      number:=0;
+
+--
+
+v_cliente_atributo  varchar2(250);
+v_mail_atributo     varchar2(250);
+v_telefono_atributo varchar2(250);
+v_tipo_cliente_atributo varchar2(250);
+
+v_debug_id          number;
+v_org_id_api        number;
+v_abort             boolean:=false;
+v_trx_cont          number:=0;
+v_trx_cont_ok       number:=0;
+
+v_almacen           varchar2(200);
+v_trx_date          date;
+BEGIN
+
+/* si se ejecuta fuera de un concurrente*/
+/*   fnd_global.APPS_INITIALIZE (0,20678,222,0,7121);
+apps.fnd_client_info.set_org_context(101);
+MO_GLOBAL.INIT('AR');
+--MO_GLOBAL.SET_POLICY_CONTEXT('S', 81);
+commit;*/
+
+  dbms_output.put_line( 'Ruta: ' || v_path);
+--o      dbms_output.put_line( 'Archivo: ' || p_file);
+--o      v_file_ar := SYS.UTL_FILE.fopen (v_path, p_file, 'r');
+  dbms_output.put_line( 'Archivo abierto');
+
+--SYS.UTL_FILE.get_line (v_file_ar, v_line);
+
+  v_line:=null;
+--LECTURA ARCHIVO
+  LOOP
+
+  /*o       begin
+             SYS.UTL_FILE.get_line (v_file_ar, v_line);
+         exception
+             when no_data_found then
+                 v_line := null;
+         end;
+  */
+  exit when v_exit = 1;
+  v_line := 'UE001038|004|1|FAC|SI|11496|001472||1780|1|ZP5501|PIEZA|1500.000|3452.55|2.3017|16%|MXN|||||FABRICANTE|ALM004|06/06/2012|';
+  if v_line is not null then
+
+  v_rec_no := v_rec_no + 1;
+  --        dbms_output.put_line( v_line);
+
+  v_trx_number:=null;
+  v_organization_code:=null;
+  v_corte:=null;
+  v_tipo_trx:=null;
+  v_cliente_mostrador:=null;
+  v_bill_customer_id:=null;
+  v_bill_address_id:=null;
+  v_trx_number_app:=null;
+  v_line_trx_app:=null;
+  v_line_trx:=null;
+  v_articulo:=null;
+  v_uom:=null;
+  v_cantidad:=null;
+  v_importe:=null;
+  v_unit_selling_price:=null;
+  v_payment_term:=null;
+  v_cliente_atributo:=null;
+  v_mail_atributo:=null;
+  v_telefono_atributo:=null;
+  v_tipo_cliente_atributo:=null;
+  v_almacen:=null;
+
+  v_substr:=null;
+
+  for i in 1..25 loop
+
+  if i = 1
+    then       -- numero transaccion
+    v_trx_number:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    --                dbms_output.put_line( 'v_trx_number:  '||v_trx_number);
+    if v_trx_number is null then
+    dbms_output.put_line( 'El numero de transaccion es obligatorio, corregir y volver a intentar');
+    v_errores_gral := v_errores_gral + 1;
+    --p_trx_header_tbl.delete;
+    trx_tabla_err(v_trx_cont).trx_number := v_trx_number;
+    trx_tabla_err(v_trx_cont).msg_error :=
+            '|Linea: '||v_rec_no||
+                    '|El numero de transaccion es obligatorio, corregir y volver a intentar';
+    v_trx_cont := v_trx_cont + 1;
+    continue;
+    end if;
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 2 then    -- codigo tienda (organizacion de inventarios)
+    v_organization_code:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_organization_code:  '||v_organization_code);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 3 then    -- corte del dia
+    v_corte:= trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_corte:  '||v_corte);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 4 then    -- tipo de transaccion DEV o FAC
+    v_tipo_trx:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_tipo_trx:  '||v_tipo_trx);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 5 then    -- Cliente Mostrador SI o NO
+    v_cliente_mostrador:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_cliente_mostrador:  '||v_cliente_mostrador);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 6 then -- numero cliente crescendo
+    v_cliente_crescendo:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_cliente_crescendo:  '||v_cliente_crescendo);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 7 then -- numero cliente oracle
+    v_cliente_oracle:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_cliente_oracle:  '||v_cliente_oracle);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 8 then -- numero de la factura a aplicar, solo para notas de credito tipo_trx = DEV
+    v_trx_number_app:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_trx_number_app:  '||v_trx_number_app);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 9 then -- linea de la factura a ser aplicada, solo para notas de credito tipo_trx = DEV
+    v_line_trx_app:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_line_trx_app:  '||v_line_trx_app);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 10 then -- linea de la transaccion que se esta creando
+    v_line_trx:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_line_trx:  '||v_line_trx);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 11 then   -- Codigo del articulo, solo para clientes diferenetes a CLIENTE MOSTRADOR
+    v_articulo:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_articulo:  '||v_articulo);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 12 then   -- unidad de medida del articulo vendido, solo para clientes diferenetes a CLIENTE MOSTRADOR
+    v_substr:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    --if v_cliente_mostrador = 'NO' then
+    v_uom:=NULL;
+    open c_uom (v_substr);
+    fetch c_uom into v_uom;
+    if c_uom%notfound then
+    dbms_output.put_line( 'Unidad de medida '||v_substr||' no existe.');
+    close c_uom;
+    v_errores_gral := v_errores_gral + 1;
+    --p_trx_header_tbl.delete;
+    trx_tabla_err(v_trx_cont).trx_number := v_trx_number;
+    trx_tabla_err(v_trx_cont).msg_error :=
+            'Linea: '||v_rec_no||'|Unidad de medida '||v_substr||' no existe.';
+    v_trx_cont := v_trx_cont + 1;
+    continue;
+    end if;
+    close c_uom;
+    dbms_output.put_line( 'v_uom:  '||v_uom);
+  --end if;
+    elsif i = 13 then   -- Cantidad vendida
+    v_cantidad:= trim(to_number(substr(v_line,1,INSTR(v_line,'|')-1)));
+    dbms_output.put_line( 'v_cantidad:  '||v_cantidad);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 14 then   -- importe del articulo vendido para clientes mostrador es la suma de la venta del dia por tienda, corte, y para los demas es importe del articulo vendido cantidad X precio
+    v_importe:= trim(to_number(substr(v_line,1,INSTR(v_line,'|')-1)));
+    dbms_output.put_line( 'v_importe:  '||v_importe);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+
+    elsif i = 15 then   -- precio de venta del articulo vendido, para a CLIENTE MOSTRADOR = v_importe
+    v_unit_selling_price:=
+            trim(to_number(substr(v_line,1,INSTR(v_line,'|')-1)));
+    dbms_output.put_line( 'v_unit_selling_price:  '||v_unit_selling_price);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 16 then   -- Codigo de impuesto, definir si usamos el del articulo
+    v_tax_code:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_tax_code:  '||v_tax_code);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 17 then   -- Moneda
+    v_currency:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_currency:  '||v_currency);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 18 then   -- Tipo de cambio
+    v_exchange_rate:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_exchange_rate:  '||v_exchange_rate);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 19 then   -- Cliente quien hizo la compra
+    v_cliente_atributo:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_cliente_atributo:  '||v_cliente_atributo);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 20 then   -- Mail del comprador
+    v_mail_atributo:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_mail_atributo:  '||v_mail_atributo);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 21 then   -- telefono del comprador
+    v_telefono_atributo:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_telefono_atributo:  '||v_telefono_atributo);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 22 then   -- tipo cliente comprador
+    v_tipo_cliente_atributo:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_tipo_cliente_atributo:  '||v_tipo_cliente_atributo);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 23 then   -- subinventario
+    v_almacen:=
+            trim(substr(v_line,1,INSTR(v_line,'|')-1));
+    dbms_output.put_line( 'v_almacen:  '||v_almacen);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+    elsif i = 24 then   -- subinventario
+    v_trx_date:= to_date(trim(substr(v_line,1,INSTR(v_line,'|')-1)),'DD/MM/RRRR');
+    dbms_output.put_line( 'v_almacen:  '||v_almacen);
+    v_line:=
+            substr(v_line,INSTR(v_line,'|')+1);
+  /*
+ -- se toma el termino de pago del cliente, si no gtiene se toma como contado
+ elsif 1 = 17 then   -- Termino de pago, solo para facturas, por defautl se toma CONTADO
+ v_substr:= substr(v_line,1,INSTR(v_line,'|')-1);
+ v_line:= substr(v_line,INSTR(v_line,'|')+1);
+ open c_term (v_substr);
+ fetch c_term into  v_payment_term;
+ if c_term%notfound then
+     dbms_output.put_line( 'Termino de pago '||v_substr||' no existe.');
+     continue;
+ end if;
+ close c_term;*/
+  end if;
+  end loop;
+
+  reg_libro:=null;
+  dbms_output.put_line('c_libro');
+  open c_libro(v_organization_code);
+  fetch c_libro into reg_libro;
+  if c_libro%notfound then
+  dbms_output.put_line( 'No se encontro unidad operativa para la tienda '||v_organization_code);
+  close c_libro;
+  v_errores_gral := v_errores_gral + 1;
+  if v_trx_number_old is null
+    then
+
+    v_trx_number_old:= v_trx_number;
+
+  end if;
+  v_abort := true;
+  --p_trx_header_tbl.delete;
+  trx_tabla_err(v_trx_cont).trx_number := v_trx_number;
+  trx_tabla_err(v_trx_cont).msg_error :=
+          'Linea: '||v_rec_no||
+                  '|No se encontro unidad operativa para la tienda '||v_organization_code;
+  v_trx_cont := v_trx_cont + 1;
+  continue;
+  end if;
+  close c_libro;
+
+
+  --derivar info
+  /*    reg_origen:=null;
+      open c_origen (v_org_id);
+      fetch c_origen into reg_origen;
+      if c_origen%notfound then
+          dbms_output.put_line( 'No hay definido origen para la unidad operativa '||v_orgid);
+      end if;
+      close c_origen;
+  */
+  reg_type:=null;
+  dbms_output.put_line('v_tipo_trx='||v_tipo_trx);
+  if v_tipo_trx = 'FAC'
+    then
+
+    open c_type ('INV',reg_libro.organization_id, v_almacen);
+    fetch c_type into reg_type;
+    if c_type%notfound then
+    dbms_output.put_line( 'No se encontro tipo de transaccion de Factura para la organizacion '||v_organization_code||', y almacen '||v_almacen);
+    close c_type;
+    v_errores_gral := v_errores_gral + 1;
+    if v_trx_number_old is null
+      then
+
+      v_trx_number_old:= v_trx_number;
+
+    end if;
+    v_abort := true;
+    --p_trx_header_tbl.delete;
+    trx_tabla_err(v_trx_cont).trx_number := v_trx_number;
+    trx_tabla_err(v_trx_cont).msg_error :=
+            'Linea: '||v_rec_no||
+                    '|No se encontro tipo de transaccion de Factura para la organizacion '||v_organization_code||', y almacen '||v_almacen;
+    v_trx_cont := v_trx_cont + 1;
+    continue;
+    end if;
+    close c_type;
+
+    elsif v_tipo_trx = 'DEV' then
+
+    open c_type ('CM',reg_libro.organization_id,v_almacen);
+    fetch c_type into reg_type;
+    if c_type%notfound then
+    dbms_output.put_line( 'No se encontro tipo de transaccion de Nota de Credito para la organizacion '||v_organization_code);
+    close c_type;
+    v_errores_gral := v_errores_gral + 1;
+    if v_trx_number_old is null
+      then
+
+      v_trx_number_old:= v_trx_number;
+
+    end if;
+    --p_trx_header_tbl.delete;
+    trx_tabla_err(v_trx_cont).trx_number := v_trx_number;
+    trx_tabla_err(v_trx_cont).msg_error :=
+            'Linea: '||v_rec_no||
+                    '|No se encontro tipo de transaccion de Nota de Credito para la organizacion '||v_organization_code;
+    v_trx_cont := v_trx_cont + 1;
+    v_abort := true;
+    continue;
+
+    end if;
+    close c_type;
+
+  end if;
+  dbms_output.put_line('c_cliente');
+  reg_cliente:=null;
+  open c_cliente (reg_libro.uo,v_cliente_crescendo,v_cliente_oracle);
+  fetch c_cliente into reg_cliente;
+  if c_cliente%notfound then
+  dbms_output.put_line( 'No se encontro el cliente CRESCENDO '|| v_cliente_crescendo||', Cliente Oracle '||v_cliente_oracle||', reg_libro.uo: '||reg_libro.uo);
+  close c_cliente;
+  v_errores_gral := v_errores_gral + 1;
+  if v_trx_number_old is null
+    then
+
+    v_trx_number_old:= v_trx_number;
+
+  end if;
+  v_abort := true;
+  --p_trx_header_tbl.delete;
+  trx_tabla_err(v_trx_cont).trx_number := v_trx_number;
+  trx_tabla_err(v_trx_cont).msg_error :=
+          'Linea: '||v_rec_no||
+                  '|No se encontro el cliente CRESCENDO '|| v_cliente_crescendo||', Cliente Oracle '||v_cliente_oracle;
+  v_trx_cont := v_trx_cont + 1;
+  continue;
+  end if;
+  close c_cliente;
+
+  reg_articulo:=null;
+  open carticulo (v_articulo,v_organization_code);
+  fetch carticulo into reg_articulo;
+  if carticulo%notfound then
+  dbms_output.put_line( 'No se encontro el articulo '||v_articulo||' en la organizacion '||v_organization_code);
+  close carticulo;
+  v_errores_gral := v_errores_gral + 1;
+
+  if v_trx_number_old is null
+    then
+
+    v_trx_number_old:= v_trx_number;
+
+  end if;
+  trx_tabla_err(v_trx_cont).trx_number := v_trx_number;
+  trx_tabla_err(v_trx_cont).msg_error :=
+          'Linea: '||v_rec_no||'|No se encontro el articulo '||v_articulo||' en la organizacion '||v_organization_code;
+  v_trx_cont := v_trx_cont + 1;
+  v_abort := true;
+  continue;
+  end if;
+  close carticulo;
+  dbms_output.put_line('v_exit='||v_exit );
+    else
+
+    v_exit := 1;
+
+    dbms_output.put_line('Ultima Linea........');
+  --
+--        dbms_output.put_line('v_trx_number_old='||v_trx_number_old);
+--        dbms_output.put_line('v_trx_number='||v_trx_number);
+--        dbms_output.put_line('v_exit='||v_exit);
+--        dbms_output.put_line('v_cabeza='||v_cabeza);
+
+  end if;
+
+  dbms_output.put_line('Termina if');
+
+  if
+          nvl(v_trx_number_old,'xxxx') != v_trx_number or v_exit = 1 then
+
+
+
+  /*if v_abort
+  then
+        dbms_output.put_line( 'Transaccion no creada '|| v_trx_number_old);
+        v_abort := false; --reiniciando bandera
+        trx_tabla_err(v_trx_cont).trx_number := v_trx_number_old;
+        trx_tabla_err(v_trx_cont).msg_error := 'Linea: '||v_rec_no||'|Transaccion No creada';
+        v_trx_cont := v_trx_cont + 1;
+  els*/
+  dbms_output.put_line('v_cabeza ='||v_cabeza );
+  v_cabeza :=1;
+  --yo puse esta linea para forzar
+
+  if v_cabeza = 1 then
+
+  --v_importe_app_old := v_importe_app;
+
+  dbms_output.put_line( 'Creando Transaccion '|| v_trx_number_old ||' ...');
+
+  l_customer_trx_id := null;
+  l_return_status := null;
+
+  /*delete from ar_trx_errors_gt;
+
+delete from ar_trx_header_tmp_gt;
+delete from ar_trx_lines_tmp_gt;
+delete from ar_trx_dist_tmp_gt;
+delete from ar_trx_salescredits_tmp_gt;
+
+delete from ar_trx_header_gt;
+delete from ar_trx_lines_gt;
+delete from ar_trx_dist_gt;
+delete from ar_trx_salescredits_gt;
+--delete from ar_trx_errors_gt;
+DELETE FROM ZX_TRX_HEADERS_GT;
+DELETE FROM ZX_TRANSACTION_LINES_GT;
+DELETE FROM ZX_IMPORT_TAX_LINES_GT;*/
+
+  --commit;
+
+
+
+--            dbms_output.put_line('Debug: '||fnd_profile.value('AFLOG_ENABLED'));
+
+--            select max(log_sequence)
+--            into v_debug_id
+--            from fnd_log_messages;
+
+
+  dbms_output.put_line('Debug id: '||v_debug_id);
+  MO_GLOBAL.INIT('AR');
+  MO_GLOBAL.SET_POLICY_CONTEXT('S', 101);
+  commit;
+
+  select MO_GLOBAL.get_current_org_id()
+    into v_org_id from dual;
+  FND_FILE.PUT_LINE(FND_FILE.LOG,'Current MO Org_id='||v_org_id);
+  dbms_output.put_line('Current MO Org_id='||v_org_id);
+
+  /*o            AR_INVOICE_API_PUB.create_single_invoice(
+   p_api_version           => 1.0,
+   p_init_msg_list         => FND_API.G_FALSE,
+   p_commit                => FND_API.G_TRUE,
+   p_batch_source_rec      => o_batch_source_rec,
+   x_customer_trx_id       => l_customer_trx_id,
+   p_trx_header_tbl        => o_trx_header_tbl,
+   p_trx_lines_tbl         => o_trx_lines_tbl,
+   p_trx_dist_tbl          => p_trx_dist_tbl,
+   p_trx_salescredits_tbl  => p_trx_salescredits_tbl,
+   x_return_status         => l_return_status,
+   x_msg_count             => p_msg_count,
+   x_msg_data              => p_msg_data
+  );*/
+
+  AR_INVOICE_API_PUB.create_single_invoice(
+  p_api_version => 1.0,
+          x_return_status => l_return_status,
+          x_msg_count => p_msg_count,
+          x_msg_data => p_msg_data,
+          x_customer_trx_id => l_customer_trx_id,
+          p_batch_source_rec => o_batch_source_rec,   --SE DEBEN INGRESAR
+          p_trx_header_tbl => o_trx_header_tbl,      --SE DEBEN INGRESAR
+          p_trx_lines_tbl => o_trx_lines_tbl,       --SE DEBEN INGRESAR
+          p_trx_dist_tbl => p_trx_dist_tbl,
+          p_trx_salescredits_tbl => p_trx_salescredits_tbl
+          );
+
+  --o                    commit;
+
+  dbms_output.put_line('Despues de API');
+  dbms_output.put_line('l_return_status=' || l_return_status);
+  dbms_output.put_line('fnd_api.g_ret_sts_error='|| fnd_api.g_ret_sts_error);
+  dbms_output.put_line('l_return_status=' ||l_return_status);
+  dbms_output.put_line('fnd_api.g_ret_sts_unexp_error=' ||fnd_api.g_ret_sts_unexp_error );
+
+  /*if l_customer_trx_id is not null then
+      dbms_output.put_line('Customer Trx id '|| l_customer_trx_id);
+       COMMIT;
+
+       v_trx_number_new:=null;
+       open C_trx_number (l_customer_trx_id);
+       fetch c_trx_number into v_trx_number_new;
+       close c_trx_number;
+
+       dbms_output.put_line( 'Transaccion Creada Exitosamente => '||v_trx_number_new);
+
+  els*/
+  IF
+          l_return_status = fnd_api.g_ret_sts_error OR
+                  l_return_status = fnd_api.g_ret_sts_unexp_error
+    THEN
+    dbms_output.put_line('unexpected errors found!');
+
+    dbms_output.put_line( 'Transaccion no Creada');
+    dbms_output.put_line( 'Msg '|| substr(p_msg_data,1,225));
+    dbms_output.put_line('Status '|| l_return_status);
+    dbms_output.put_line('v_trx_number                                          ='||v_trx_number_old);
+    dbms_output.put_line('o_batch_source_rec.batch_source_id                    ='||
+            o_batch_source_rec.batch_source_id );
+    dbms_output.put_line('o_trx_header_tbl('||v_cabeza||').trx_header_id        ='||
+            o_trx_header_tbl(v_cabeza).trx_header_id);
+    dbms_output.put_line('o_trx_header_tbl('||v_cabeza||').cust_trx_type_id     ='||
+            o_trx_header_tbl(v_cabeza).cust_trx_type_id);
+    dbms_output.put_line('o_trx_header_tbl('||v_cabeza||').bill_to_customer_id  ='||
+            o_trx_header_tbl(v_cabeza).bill_to_customer_id);
+    dbms_output.put_line('o_trx_header_tbl('||v_cabeza||').bill_to_address_id   ='||
+            o_trx_header_tbl(v_cabeza).bill_to_address_id);
+    dbms_output.put_line('o_trx_header_tbl('||v_cabeza||').term_id              ='||
+            o_trx_header_tbl(v_cabeza).term_id);
+    dbms_output.put_line('o_trx_header_tbl('||v_cabeza||').trx_date             ='||
+            o_trx_header_tbl(v_cabeza).trx_date);
+    dbms_output.put_line('o_trx_header_tbl('||v_cabeza||').trx_currency         ='||
+            o_trx_header_tbl(v_cabeza).trx_currency);
+    dbms_output.put_line('o_trx_header_tbl('||v_cabeza||').trx_number         ='||
+            o_trx_header_tbl(v_cabeza).trx_number);
+    v_errores_gral := v_errores_gral + 1;
+
+    trx_tabla_err(v_trx_cont).trx_number := v_trx_number_old;
+    trx_tabla_err(v_trx_cont).msg_error :=
+            'Linea: '||v_rec_no||
+                    '|Errores en al API, revisar el Log en el numero de transaccion: '||v_trx_number_old||','||substr(p_msg_data,1,225);
+    v_trx_cont := v_trx_cont + 1;
+
+    FOR i in c_erro_c LOOP
+
+    dbms_output.put_line('----------------------------------------------------');
+    dbms_output.put_line('Header ID       = ' || to_char(i.trx_header_id));
+    dbms_output.put_line('Line ID         = ' || to_char(i.trx_line_id));
+    dbms_output.put_line('Sales Credit ID = ' || to_char(i.trx_salescredit_id));
+    dbms_output.put_line('Dist Id         = ' || to_char(i.trx_dist_id));
+    dbms_output.put_line('Contingency ID  = ' || to_char(i.trx_contingency_id));
+    dbms_output.put_line('Message         = ' || substr(i.error_message,1,80));
+    dbms_output.put_line('Invalid Value   = ' || substr(i.invalid_value,1,80));
+    dbms_output.put_line('----------------------------------------------------');
+    END LOOP;
+    /*FOR c_erro IN c_erro_c (p_trx_header_tbl(v_cabeza).trx_header_id)
+   LOOP
+      dbms_output.put_line(
+                            'Errores: '
+                         || c_erro.error_message
+                         || ' valor no valido: '
+                         || c_erro.invalid_value
+                         || ' id de encabezado: '
+                         || c_erro.trx_header_id
+                         || ' id linea: '
+                         || c_erro.trx_line_id
+                         || ' id distribucion: '
+                         || c_erro.trx_dist_id
+                        );
+   END LOOP;*/
+
+    delete from ar_trx_errors_gt;
+
+  --o                commit;
+
+    ELSE
+    SELECT count(*)
+      Into l_cnt
+      From ar_trx_errors_gt;
+    IF l_cnt = 0
+      THEN
+      dbms_output.put_line('Customer Trx id '|| l_customer_trx_id);
+      --o                COMMIT;
+
+      v_trx_number_new:=null;
+      open C_trx_number (l_customer_trx_id);
+      fetch c_trx_number into v_trx_number_new;
+      close c_trx_number;
+
+      dbms_output.put_line( 'Transaccion Creada Exitosamente => '||v_trx_number_new);
+
+      trx_tabla_ok(v_trx_cont_ok).trx_number := v_trx_number_new;
+      v_trx_cont_ok := v_trx_cont_ok + 1;
+
+      if v_tipo_trx_old = 'DEV' then
+
+      v_customer_trx_id_inv := 0;
+      OPEN C_trx (v_trx_number_app_old,
+              reg_cliente.orig_system_bill_address_id,
+              reg_cliente.orig_system_bill_customer_id);
+      FETCH C_trx INTO v_customer_trx_id_inv;
+      CLOSE C_trx;
+
+      IF
+              nvl(v_customer_trx_id_inv,0) != 0
+        THEN
+
+        dbms_output.put_line('Aplicando nota de credito a factura abierta...');
+        dbms_output.put_line('Aplicando el importe => '||v_importe_app||' a la factura => '||v_trx_number_app_old);
+        dbms_output.put_line('Aplicando nota de credito a factura abierta...');
+        dbms_output.put_line('Aplicando el importe => '||v_importe_app||' a la factura => '||v_trx_number_app_old);
+        dbms_output.put_line('v_customer_trx_id_inv => '||v_customer_trx_id_inv);
+        /*o                        XXBOL_AR_APPLY_CM_TO_DM (
+                                                            errbuf                  => v_errbuf
+                                                           ,retcode                 => v_retcode
+                                                           ,p_cm_customer_trx_id    => l_customer_trx_id
+                                                           ,p_inv_customer_trx_id   => v_customer_trx_id_inv
+                                                           ,p_org_id                => v_org_id
+                                                           ,p_amount                => round(v_importe_app,2)
+                                                           ,p_apply_date            => sysdate
+                                                            ) ;
+        */
+        IF v_RETCODE > 0
+          THEN
+          dbms_output.put_line('No se hizo la aplicacion del importe');
+          dbms_output.put_line('No se hizo la aplicacion del importe');
+          retcode :=  2;
+          v_errores_gral := v_errores_gral + 1;
+        --raise e_abort;
+        end if;
+
+        else
+
+        dbms_output.put_line( 'La factura que se desea aplicar no existe '||v_trx_number_app_old);
+        dbms_output.put_line( 'La nota de credito queda pendiente por aplicar '||v_trx_number_old);
+        dbms_output.put_line( 'La factura que se desea aplicar no existe '||v_trx_number_app_old);
+        dbms_output.put_line( 'La nota de credito queda pendiente por aplicar '||v_trx_number_old);
+        v_errores_gral := v_errores_gral + 1;
+
+      end if;
+      end if;
+
+      ELSE
+
+      dbms_output.put_line( 'Transaction not Created '||v_trx_number_old);
+      v_errores_gral := v_errores_gral + 1;
+
+      trx_tabla_err(v_trx_cont).trx_number := v_trx_number_old;
+      trx_tabla_err(v_trx_cont).msg_error :=
+              'Linea: '||v_rec_no||
+                      '|Errores en al API, revisar el Log en el numero de transaccion: '||v_trx_number_old||', '||substr(p_msg_data,1,225);
+      v_trx_cont := v_trx_cont + 1;
+      FOR i in c_erro_c LOOP
+      dbms_output.put_line('----------------------------------------------------');
+      dbms_output.put_line('Header ID       = ' || to_char(i.trx_header_id));
+      dbms_output.put_line('Line ID         = ' || to_char(i.trx_line_id));
+      dbms_output.put_line('Sales Credit ID = ' || to_char(i.trx_salescredit_id));
+      dbms_output.put_line('Dist Id         = ' || to_char(i.trx_dist_id));
+      dbms_output.put_line('Contingency ID  = ' || to_char(i.trx_contingency_id));
+      dbms_output.put_line('Message         = ' || substr(i.error_message,1,80));
+      dbms_output.put_line('Invalid Value   = ' || substr(i.invalid_value,1,80));
+      dbms_output.put_line('----------------------------------------------------');
+      END LOOP;
+      /*FOR c_erro IN c_erro_c (p_trx_header_tbl(v_cabeza).trx_header_id)
+     LOOP
+        dbms_output.put_line(
+                              'Errores: '
+                           || c_erro.error_message
+                           || ' valor no valido: '
+                           || c_erro.invalid_value
+                           || ' id de encabezado: '
+                           || c_erro.trx_header_id
+                           || ' id linea: '
+                           || c_erro.trx_line_id
+                           || ' id distribucion: '
+                           || c_erro.trx_dist_id
+                          );
+     END LOOP;*/
+      delete from ar_trx_errors_gt;
+
+    --o               commit;
+
+    END IF;
+
+  END IF;
+
+  v_cabeza := 0;
+
+  end if;
+
+  if v_exit = 1 then
+  continue;
+  end if;
+
+  dbms_output.put_line('*******START******');
+  dbms_output.put_line('reg_libro.uo: '||reg_libro.uo);
+  /*o           fnd_global.APPS_INITIALIZE (0,20678,222,0,7121);
+              MO_GLOBAL.INIT('AR'); --** IMP Comment this Line **
+   --o           commit;
+
+              MO_GLOBAL.SET_POLICY_CONTEXT('S', reg_libro.uo);
+              apps.fnd_client_info.set_org_context(reg_libro.uo);
+              select MO_GLOBAL.get_current_org_id()
+              into v_org_id from dual;
+  --            dbms_output.put_line('Current MO Org_id='||v_org_id);
+  */
+  fnd_global.APPS_INITIALIZE (-1,20678,222,0);
+  --,7121);
+  ----apps.fnd_client_info.set_org_context(101);
+  MO_GLOBAL.INIT('AR');
+  MO_GLOBAL.SET_POLICY_CONTEXT('S', 101);
+  commit;
+
+  select MO_GLOBAL.get_current_org_id()
+    into v_org_id from dual;
+  FND_FILE.PUT_LINE(FND_FILE.LOG,'Current MO Org_id='||v_org_id);
+  dbms_output.put_line('Current MO Org_id='||v_org_id);
+
+  o_trx_header_tbl.delete;
+  o_trx_lines_tbl.delete;
+
+  v_linea := 0;
+  --AR_INVOICE_API_PUB.clean_tmp_gt;
+  --AR_INVOICE_API_PUB.clean_gt;
+
+  reg_exists:=null;
+  OPEN C_trx_exists (v_trx_number,
+          reg_cliente.orig_system_bill_address_id,
+          reg_cliente.orig_system_bill_customer_id,reg_type.cust_trx_type_id, reg_type.batch_source_id );
+  FETCH C_trx_exists INTO reg_exists;
+  if c_trx_exists%found then
+  CLOSE C_trx_exists;
+  trx_tabla_err(v_trx_cont).trx_number := v_trx_number;
+  trx_tabla_err(v_trx_cont).msg_error :=
+          'Linea: '||v_rec_no||
+                  '|El numero de transaccion ya fue cargada anteriormente';
+  v_trx_cont := v_trx_cont + 1;
+  dbms_output.put_line('El numero de transaccion ya fue cargada anteriormente');
+  dbms_output.put_line('------------------------------------------------------');
+  dbms_output.put_line('Transaccion           ='||v_trx_number);
+  dbms_output.put_line('bill_to_address_id    ='||
+          reg_cliente.orig_system_bill_address_id);
+  dbms_output.put_line('bill_to_customer_id   ='||
+          reg_cliente.orig_system_bill_customer_id);
+  dbms_output.put_line('cust_trx_type_id      ='||reg_type.cust_trx_type_id);
+  dbms_output.put_line('batch_source_id       ='||reg_type.batch_source_id );
+  dbms_output.put_line('------------------------------------------------------');
+  continue;
+  end if;
+  CLOSE C_trx_exists;
+
+  select seq_trx_header_id.NEXTVAL
+    into v_header_id
+    from dual;
+
+  v_cabeza := 1;
+
+  v_importe_app:=0;
+
+  v_trx_number_old        := v_trx_number;
+  v_tipo_trx_old          := v_tipo_trx;
+  v_trx_number_app_old    := v_trx_number_app;
+
+  -- this is the header
+  o_batch_source_rec.batch_source_id             := reg_type.batch_source_id;
+  --1;
+  o_trx_header_tbl(v_cabeza).trx_header_id       := v_header_id;
+  o_trx_header_tbl(v_cabeza).cust_trx_type_id    := reg_type.cust_trx_type_id;
+  o_trx_header_tbl(v_cabeza).trx_date            := nvl(v_trx_date,sysdate);
+  --sysdate;--temporal
+  o_trx_header_tbl(v_cabeza).bill_to_customer_id :=
+          reg_cliente.orig_system_bill_customer_id;
+  o_trx_header_tbl(v_cabeza).bill_to_address_id  :=
+          reg_cliente.orig_system_bill_address_id;
+  if v_currency is not null
+    then
+    o_trx_header_tbl(v_cabeza).trx_currency        := v_currency;
+  end if;
+  IF nvl(v_currency,'MXN') = 'USD'
+    THEN
+    o_trx_header_tbl(v_cabeza).exchange_rate_type  := 'User';
+    o_trx_header_tbl(v_cabeza).exchange_rate       := v_exchange_rate;
+  END IF;
+
+  if v_tipo_trx = 'FAC'
+    then
+    o_trx_header_tbl(v_cabeza).term_id             := reg_cliente.term_id;
+  end if;
+
+  -- se cambio ya que la numeracion de trx de crescendo son automaticas
+--o_trx_header_tbl(v_cabeza).trx_number := v_trx_number;
+  o_trx_header_tbl(v_cabeza).interface_header_attribute1 := v_trx_number;
+  --p_trx_header_tbl(1).trx_currency := 'MXN';
+
+
+  end if;
+
+  -- PARA AJUSTAR LA PRESICION
+  /*if round(v_unit_selling_price,5) * V_cantidad != round(v_importe,5) then
+     v_importe := round(v_unit_selling_price,5) * V_cantidad;
+     v_unit_selling_price := round(v_unit_selling_price,2);
+ end if;*/
+  /*v_importe := arpcurr.currround(V_cantidad *
+  v_unit_selling_price,v_currency);*/
+  v_importe :=
+          V_cantidad * v_unit_selling_price;
+
+  --        dbms_output.put_line('v_importe='|| v_importe||'; v_unit_selling_price='||v_unit_selling_price||'; V_cantidad='||V_cantidad);
+
+
+
+
+  if v_tipo_trx = 'DEV'
+    then
+
+    v_importe_app := v_importe_app + round((v_importe +
+            (v_importe * reg_articulo.percentage_rate)/100),2);
+
+  end if;
+
+  select seq_trx_line_id.NEXTVAL
+    into v_line_id
+    from dual;
+
+  v_linea := v_linea + 1;
+
+  --    dbms_output.put_line(' v_header_id='|| v_header_id||', v_line_id='||v_line_id||', v_linea='||v_linea);
+
+  if v_cliente_mostrador = 'SI'
+    then
+
+    /* open c_memoline(reg_libro.uo);
+   fetch c_memoline into reg_memoline;
+   if c_memoline%notfound then
+      dbms_output.put_line( 'No se encontro la memoline Ventas Mostrador para la unidad operativa'||v_org_id);
+      close c_memoline;
+      v_errores_gral := v_errores_gral + 1;
+      trx_tabla_err(v_trx_cont).trx_number := v_trx_number;
+      trx_tabla_err(v_trx_cont).msg_error := 'Linea: '||v_rec_no||'|No se encontro la memoline Ventas Mostrador para la unidad operativa'||v_org_id;
+      v_trx_cont := v_trx_cont + 1;
+      v_abort:=true;
+      continue;
+   end if;
+   close c_memoline;
+
+   v_importe_app := v_importe_app + round(v_importe,2);
+
+  -- this is the first line
+   o_trx_lines_tbl(v_linea).trx_header_id := v_header_id;
+   o_trx_lines_tbl(v_linea).trx_line_id := v_line_id;
+   o_trx_lines_tbl(v_linea).line_number := v_line_trx;
+   if v_tipo_trx = 'FAC' then
+       o_trx_lines_tbl(v_linea).memo_line_id := reg_memoline.memo_line_id;
+       o_trx_lines_tbl(v_linea).amount := v_importe;
+       o_trx_lines_tbl(v_linea).quantity_invoiced := V_cantidad;-- 1;
+   else
+       o_trx_lines_tbl(v_linea).description :=reg_articulo.description;
+       o_trx_lines_tbl(v_linea).inventory_item_id := reg_articulo.inventory_item_id;
+       o_trx_lines_tbl(v_linea).memo_line_id := null;
+       o_trx_lines_tbl(v_linea).amount := v_importe*-1;
+       o_trx_lines_tbl(v_linea).quantity_invoiced := V_cantidad*-1;
+   end if;
+
+
+   o_trx_lines_tbl(v_linea).unit_selling_price := v_unit_selling_price;
+   o_trx_lines_tbl(v_linea).line_type := 'LINE';
+   --p_trx_lines_tbl(v_linea).taxable_flag := 'N';
+
+   dbms_output.put_line('v_header_id='||v_header_id);
+   dbms_output.put_line('v_line_id='||v_line_id);
+   dbms_output.put_line('v_line='||v_line_trx);
+   dbms_output.put_line('reg_memoline.memo_line_id='||reg_memoline.memo_line_id);
+   dbms_output.put_line('v_quantity='||v_quantity);
+
+   if  v_tipo_cliente_atributo is not null or
+       v_mail_atributo is not null or
+       v_telefono_atributo is not null or
+       v_tipo_cliente_atributo is not null
+   then
+       o_trx_lines_tbl(v_linea).Interface_line_context := 'CRESCENDO';
+       o_trx_lines_tbl(v_linea).INTERFACE_LINE_ATTRIBUTE1:= v_tipo_cliente_atributo;
+       o_trx_lines_tbl(v_linea).INTERFACE_LINE_ATTRIBUTE2:= v_mail_atributo;
+       o_trx_lines_tbl(v_linea).INTERFACE_LINE_ATTRIBUTE3:= v_telefono_atributo;
+       o_trx_lines_tbl(v_linea).INTERFACE_LINE_ATTRIBUTE4:= v_tipo_cliente_atributo;
+   end if;*/
+
+    v_importe_app :=
+            v_importe_app + round(v_importe,2);
+
+    o_trx_lines_tbl(v_linea).trx_header_id         := v_header_id;
+    o_trx_lines_tbl(v_linea).trx_line_id           := v_line_id;
+    o_trx_lines_tbl(v_linea).line_number           := v_line_trx;
+    o_trx_lines_tbl(v_linea).description           := reg_articulo.description;
+    --reg_trx.description;
+
+    if v_tipo_trx = 'FAC'
+      then
+      o_trx_lines_tbl(v_linea).UOM_CODE              := v_uom;
+      o_trx_lines_tbl(v_linea).amount                := v_importe;
+      o_trx_lines_tbl(v_linea).quantity_invoiced     := V_cantidad;
+      else
+      o_trx_lines_tbl(v_linea).UOM_CODE              := null;
+      o_trx_lines_tbl(v_linea).amount                := v_importe*-1;
+      o_trx_lines_tbl(v_linea).quantity_invoiced     := V_cantidad*-1;
+    end if;
+
+    o_trx_lines_tbl(v_linea).unit_selling_price         := v_unit_selling_price;
+    o_trx_lines_tbl(v_linea).line_type                  := 'LINE';
+    o_trx_lines_tbl(v_linea).inventory_item_id          := reg_articulo.inventory_item_id;
+    --o_trx_lines_tbl(v_linea).AMOUNT_INCLUDES_TAX_FLAG   := 'Y'; --TEMPORAL
+
+--p_trx_lines_tbl(v_linea).taxable_flag          := 'N';
+
+    if
+            v_tipo_cliente_atributo is not null or v_mail_atributo is not null or
+                    v_telefono_atributo is not null or
+                    v_tipo_cliente_atributo is not null
+      then
+      o_trx_lines_tbl(v_linea).Interface_line_context := 'CRESCENDO';
+
+      o_trx_lines_tbl(v_linea).INTERFACE_LINE_ATTRIBUTE1:= v_cliente_atributo;
+      o_trx_lines_tbl(v_linea).INTERFACE_LINE_ATTRIBUTE2:= v_telefono_atributo;
+      o_trx_lines_tbl(v_linea).INTERFACE_LINE_ATTRIBUTE3:= v_mail_atributo;
+      o_trx_lines_tbl(v_linea).INTERFACE_LINE_ATTRIBUTE4:= v_tipo_cliente_atributo;
+
+    end if;
+
+    else
+
+    o_trx_lines_tbl(v_linea).trx_header_id         := v_header_id;
+    o_trx_lines_tbl(v_linea).trx_line_id           := v_line_id;
+    o_trx_lines_tbl(v_linea).line_number           := v_line_trx;
+    o_trx_lines_tbl(v_linea).description           := reg_articulo.description;
+    --reg_trx.description;
+
+    if v_tipo_trx = 'FAC'
+      then
+      o_trx_lines_tbl(v_linea).UOM_CODE              := v_uom;
+      o_trx_lines_tbl(v_linea).amount                := v_importe;
+      o_trx_lines_tbl(v_linea).quantity_invoiced     := V_cantidad;
+      else
+      o_trx_lines_tbl(v_linea).UOM_CODE              := null;
+      o_trx_lines_tbl(v_linea).amount                := v_importe*-1;
+      o_trx_lines_tbl(v_linea).quantity_invoiced     := V_cantidad*-1;
+    end if;
+
+    o_trx_lines_tbl(v_linea).unit_selling_price    := v_unit_selling_price;
+    o_trx_lines_tbl(v_linea).line_type             := 'LINE';
+    o_trx_lines_tbl(v_linea).inventory_item_id     := reg_articulo.inventory_item_id;
+  --p_trx_lines_tbl(v_linea).taxable_flag          := 'N';
+
+  end if;
+
+  end loop;
+
+--o     commit;
+
+  if v_errores_gral > 0 then
+  retcode := 1;
+  end if;
+
+  if trx_tabla_ok.COUNT > 0 then
+
+  dbms_output.put_line('Resumen de transacciones creadas:');
+  dbms_output.put_line('***************************************************************');
+
+  for i in trx_tabla_ok.first .. trx_tabla_ok.last loop
+  dbms_output.put_line('Numero de transaccion='|| trx_tabla_ok(i).trx_number);
+  end loop;
+
+  dbms_output.put_line('***************************************************************');
+
+  end if;
+
+  if trx_tabla_err.COUNT > 0 then
+
+  dbms_output.put_line('Resumen de transacciones no creadas:');
+  dbms_output.put_line('***************************************************************');
+
+  for i in trx_tabla_err.first .. trx_tabla_err.last loop
+  dbms_output.put_line('Numero de transaccion='|| trx_tabla_err(i).trx_number||'|'||trx_tabla_err(i).msg_error);
+  end loop;
+
+  dbms_output.put_line('***************************************************************');
+  dbms_output.put_line('Revisar el log completo para identifacr los errores');
+
+  end if;
+
+  SYS.UTL_FILE.fclose (v_file_ar);
+
+END;
+--XXBOL_AR_TRANSACTIONS_PRC;
