@@ -201,7 +201,7 @@ BEGIN
     INTO     l_customer_trx_id
   from dual;
 
-  dbms_output.put_line('---------EJECUTANDO LA INIACIALIZACION DE PARAMETROS-------');
+  dbms_output.put_line('---------EJECUTANDO LA INICIALIZACION DE PARAMETROS-------');
   dbms_output.put_line('Aplicando nota de credito a factura abierta...');
   dbms_output.put_line('Aplicando el importe => '||v_importe_app||' a la factura => '||v_trx_number_app_old);
   dbms_output.put_line('Aplicando nota de credito a factura abierta...');
