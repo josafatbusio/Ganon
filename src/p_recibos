@@ -5,26 +5,58 @@
 
 DECLARE
 
-v_cheque:=null; 					      --se obtiene de el tercer parametro del archivo
-v_importe:=null; 					      --se obtiene del segundo parametro del archivo
-  l_cr_id              number;
-v_payment_date:=null;				       -- es el primer parametro del archivo
-  l_return_status     VARCHAR2 (1);
-  l_msg_data_out      VARCHAR2 (240);
-v_moneda    :=null;					      --decimo parametro del archivo
-  v_exchange_rate_type varchar2(200);       --null o USER
-v_tipo_cambio:=null;						--onceavo parametro del archivo
+v_cheque        varchar2(200); 					 --se obtiene de el tercer parametro del archivo
+v_importe       number; 					     --se obtiene del segundo parametro del archivo
+l_cr_id         number;
+v_payment_date  date;				             -- es el primer parametro del archivo
+l_return_status VARCHAR2 (1);
+l_msg_data_out  VARCHAR2 (240);
+v_moneda        varchar2(200);				    --decimo parametro del archivo
+v_exchange_rate_type varchar2(200);             --null o USER
+v_tipo_cambio    varchar2(200);					--onceavo parametro del archivo
+v_metodo         varchar2(200);                 --noveno parametro del archivo
+v_cuenta         varchar2(200);                 --octavo parametro del archivo
+v_transaccion    varchar2(200);                 --sexto parametro del archivo
 
-v_metodo    :=null;                      --noveno parametro del archivo
+v_cliente		 varchar2(200); 			    --cuarto parametro del archivo
+v_cliente_oracle varchar2(200); 				--quinto parametro del archivo
 
-  cursor c_metodo (p_name varchar2)
-  is
-  select *
-    from   ar_receipt_methods
-    where name = p_name
-            and sysdate between start_date and nvl(end_date,sysdate);
+reg_libro.uo
 
-  reg_metodo c_metodo%rowtype;
+cursor c_metodo (p_name varchar2)
+is
+select *
+  from   ar_receipt_methods
+  where name = p_name
+          and sysdate between start_date and nvl(end_date,sysdate);
+
+reg_metodo c_metodo%rowtype;
+
+
+cursor c_account (p_receipt_method_id number, p_account_name varchar2, p_currency varchar2)
+is
+
+SELECT   *
+  FROM ar_receipt_method_accounts_all
+  WHERE (  remit_bank_acct_use_id IN (
+            SELECT ba.bank_acct_use_id
+    FROM ce_bank_acct_uses_all ba,
+            ce_bank_accounts cba,
+            ce_bank_branches_v bb
+    WHERE bb.bank_name LIKE '%'
+            AND bb.bank_branch_name LIKE '%'
+            AND bb.bank_institution_type = 'BANK'
+            AND bb.branch_party_id = cba.bank_branch_id
+            AND cba.bank_account_id = ba.bank_account_id
+            AND cba.account_classification = 'INTERNAL'
+            and cba.bank_account_name = p_account_name
+            and cba.currency_code = p_currency
+          )
+          )
+          AND (receipt_method_id = p_receipt_method_id)
+  ORDER BY remit_bank_acct_use_id;
+
+reg_account c_account%rowtype;
 
 BEGIN
 
@@ -41,14 +73,27 @@ BEGIN
   end if;
   close c_metodo;
 
+  reg_account:=null;
+  open c_account (reg_metodo.receipt_method_id, v_cuenta, v_moneda);
+  fetch c_account into reg_account;
+  if c_account%notfound then
+  close c_account;
+  dbms_output.put_line('Nombre de cuenta no existe en Oracle '||v_cuenta||' para el metodo de pago '||v_metodo||' y moneda '||v_moneda);
+  trx_tabla_err(v_errores).trx_number := v_cheque;
+  trx_tabla_err(v_errores).msg_error := 'Nombre de cuenta no existe en Oracle '||v_cuenta||' para el metodo de pago '||v_metodo||' y moneda '||v_moneda;
+  v_errores := v_errores + 1;
+  continue;
+  end if;
+  close c_account;
+
   ar_receipt_api_pub.create_cash
           (p_api_version                 => 1.0, --
           p_init_msg_list               => fnd_api.g_true, --
           p_receipt_number              => v_cheque, --
           p_amount                      => v_importe, --
-          p_receipt_method_id           => reg_metodo.receipt_method_id,
-          p_remittance_bank_account_id  => reg_account.REMIT_BANK_ACCT_USE_ID,
-          p_customer_number             => reg_trx.ACCOUNT_NUMBER,
+          p_receipt_method_id           => reg_metodo.receipt_method_id,          --Obtener el id de la tabla ar_receipt_methods con el  v_metodo
+          p_remittance_bank_account_id  => reg_account.REMIT_BANK_ACCT_USE_ID,    --Obtener el REMIT_BANK_ACCT_USE_ID con estos parametros  reg_metodo.receipt_method_id, v_cuenta, v_moneda, en la query del cursor c_account
+          p_customer_number             => reg_trx.ACCOUNT_NUMBER,                --Obtener el Account_number con estos parametros v_cliente,v_cliente_oracle, v_transaccion, reg_libro.uo de la query del cursor c_trx
           p_cr_id                       => l_cr_id, --
           p_receipt_date                => v_payment_date, --
           p_gl_date                     => v_payment_date, --
