@@ -18,9 +18,8 @@ select  customer_trx_id
     and trx.bill_to_customer_id = 1050  --p_bill_id 
     --and bill_to_address_id = p_addr_id;
 
-
-    --To find the receivable_application_id of the Application line which is joining Credit Memo and Invoice is
-
+Para verificar el cambio se usa la sig query
+ --To find the receivable_application_id of the Application line which is joining Credit Memo and Invoice is
 select receivable_application_id
        ,ar.*
     from ar_receivable_applications_all ar
@@ -33,7 +32,7 @@ select receivable_application_id
 DECLARE
 
 --Parametros para ingresar API AR_CM_API_PUB.apply_on_account
-  v_trx_number_app_old    ra_customer_trx_all.trx_number%type     :=1091;    --INGRESAR LA FACTURA QUE ESTE ABIERTA (SE OBTIENE DE LA PANTALLA "DETALLES CUENTA")
+  v_trx_number_app_old    ra_customer_trx_all.trx_number%type     := 1091;    --INGRESAR LA FACTURA QUE ESTE ABIERTA (SE OBTIENE DE LA PANTALLA "DETALLES CUENTA")
   v_importe_app            number                                 := 100;    --PUEDO METERLO LO QUE SEA
   l_customer_trx_id       number                                  ;--:=      --DEBE SER EL CONSECUTIVO??;
   v_customer_trx_id_inv   number                                  := 153604; --customer_trx_id
