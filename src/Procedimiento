@@ -241,6 +241,11 @@ select 1
 
 reg_exists c_trx_exists%rowtype;
 
+CURSOR seq_trx is
+  SELECT  ra_customer_trx_s.nextval
+    INTO l_customer_trx_id
+  from dual;
+
 v_trx_number_new        ra_customer_trx_all.trx_number%type;
 
 v_header_id             number;
