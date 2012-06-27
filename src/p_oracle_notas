@@ -85,6 +85,8 @@ DECLARE
   l_msg_data VARCHAR2(255);
   l_out_rec_application_id NUMBER;
   l_return_status VARCHAR2(1);
+
+  l_customer_trx_id       number;
 BEGIN
 -- First set the environment of the user submitting the request by submitting
 -- fnd_global.apps_initialize().
