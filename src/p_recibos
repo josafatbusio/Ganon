@@ -1,3 +1,4 @@
+--Procedimiento para aplciar  recibos
 --Ejemplo de archivo
 --05/05/2012|7529.29000|0000430553|LE00000385|013070|R0244287|108_FRANQUICIA LEON|CG FRQ|EFECTIVO|MXN|1|108|7529.29000|
 --05/05/2012|5500.35000|0000431397|230244|006372|R0244306|109_FRANQUICIA MEDRANO|CG FRQ|EFECTIVO|MXN|1|109|5500.35000|
@@ -14,7 +15,32 @@ v_moneda    :=null;					      --decimo parametro del archivo
   v_exchange_rate_type varchar2(200);       --null o USER
 v_tipo_cambio:=null;						--onceavo parametro del archivo
 
+v_metodo    :=null;                      --noveno parametro del archivo
+
+  cursor c_metodo (p_name varchar2)
+  is
+  select *
+    from   ar_receipt_methods
+    where name = p_name
+            and sysdate between start_date and nvl(end_date,sysdate);
+
+  reg_metodo c_metodo%rowtype;
+
 BEGIN
+
+  reg_metodo:=null;
+  open c_metodo (v_metodo);
+  fetch c_metodo into reg_metodo;
+  if c_metodo%notfound then
+  close c_metodo;
+  dbms_output.put_line('metodo de pago invalido '||v_metodo);
+  trx_tabla_err(v_errores).trx_number := v_cheque;
+  trx_tabla_err(v_errores).msg_error := 'metodo de pago invalido '||v_metodo;
+  v_errores := v_errores + 1;
+  continue;
+  end if;
+  close c_metodo;
+
   ar_receipt_api_pub.create_cash
           (p_api_version                 => 1.0, --
           p_init_msg_list               => fnd_api.g_true, --
