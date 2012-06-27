@@ -1,3 +1,77 @@
+/*
+Sample Code to Apply and Unapply On Account Credit Memos using AR_CM_API_PUB API in 11.5.10.2 and R12 [ID 753244.1]
+ 	Modified 13-MAY-2011     Type SAMPLE CODE     Status PUBLISHED
+In this Document
+  Purpose
+  Software Requirements/Prerequisites
+  Configuring the Sample Code
+  Running the Sample Code
+  Caution
+  Sample Code
+  Sample Code Output
+  References
+
+Applies to:
+
+Oracle Receivables - Version: 11.5.10.2 to 12.1.3 - Release: 11.5.10 to 12.1
+Information in this document applies to any platform.
+*** Checked for relevance on 14-May-2010 ***
+AR_CM_API_PUB
+Purpose
+
+Oracle has provided a new API AR_CM_API_PUB through which we can Apply and Unapply On-Account Credit Memos to to open Invoices / Debit Memos
+Invoice Creation API AR_INVOICE_API_PUB allows creating On Account Credit Memos after applying Patch 5257046 in release 11.5.10.2 and R12.AR.A.delta.2 onwards.
+
+Software Requirements/Prerequisites
+
+You can use SQL PLUS /SQL*Plus / Oracle SQL Developer to run the script
+Configuring the Sample Code
+
+Run the script and create procedure in APPS schema.
+Running the Sample Code
+
+The following 2 Procedures are provided through this API:
+AR_CM_API_PUB.APPLY_ON_ACCOUNT
+==============================
+Call this routine to apply on-account credit memos to a debit item.
+Besides the standard input parameters, the API accepts the credit memo related parameters as a record type.The API needs input parameters to determine the credit memo and the debit memo transaction. If the required parameters are not passed in a call to this API, then the call will fail.
+
+AR_CM_API_PUB.UNAPPLY_ON_ACCOUNT
+================================
+Call this routine to unapply on-account credit memo applied to a debit item.
+Besides the standard input parameters, the API accepts the receivable application parameters as a record type. The API needs input parameters to determine the transaction to unapply. If the required parameters are not passed in a call to this API, then the call will fail.
+Please refer to Note 457451.1 How to Create, Apply and Unapply On Account Credit Memos Using ar_invoice_api_pub API
+
+
+Caution
+
+This sample code is provided for educational purposes only and not supported by Oracle Support Services. It has been tested internally, however, and works as documented. We do not guarantee that it will work for you, so be sure to test it in your environment before relying on it.
+Proofread this sample code before using it! Due to the differences in the way text editors, e-mail packages and operating systems handle text formatting (spaces, tabs and carriage returns), this sample code may not be in an executable state when you first receive it. Check over the sample code to ensure that errors of this type are corrected.
+
+Sample Code
+
+First find out user_id and RESPONSIBILITY_ID through which you will submit the program to set the context :
+SELECT USER_ID,RESPONSIBILITY_ID,RESPONSIBILITY_APPLICATION_ID,
+SECURITY_GROUP_ID
+FROM FND_USER_RESP_GROUPS
+WHERE USER_ID = (SELECT USER_ID
+FROM FND_USER
+WHERE USER_NAME = '&user_name')
+AND RESPONSIBILITY_ID = (SELECT RESPONSIBILITY_ID
+FROM FND_RESPONSIBILITY_VL
+WHERE RESPONSIBILITY_NAME = '&resp_name');
+
+
+Then Find out the customer_trx_id of the Invoice and Credit Memo using the following sql :
+
+select Customer_Trx_ID
+from RA_CUSTOMER_TRX_ALL
+where trx_number ='&transaction_number';
+
+The following code can be used to apply Credit Memo to Invoice :
+Important parameters to be passed are Customer Trx Id of Invoice and Credit Memo, Amount applied . You can change the Apply_date and GL_date to desired value instead of sysdate.
+If Receipt Application Information DFF are set then please pass the value in appropriate attributes.
+*/
 DECLARE
   K_api_version CONSTANT NUMBER := 1;
   K_init_msg_list CONSTANT VARCHAR2(1) := FND_API.g_false;
