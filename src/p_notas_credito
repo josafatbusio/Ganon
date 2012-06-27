@@ -1,17 +1,39 @@
 --Procedimiento de pruebas para aplicar notas de credito
+/*
+PARA PROBAR ESTE PROCEDIMIENTO ES NECESARIO INGRESAR LOS PARAMETROS
+    v_trx_number_app_old
+    v_importe_app 
+    l_customer_trx_id 
+    v_customer_trx_id_inv
+    v_org_id 
+    
+QUERY PARA OBTENER EL customer_trx_id  EL org_id Y SUSTITUIRLOS EN v_customer_trx_id_inv Y EN v_org_id 
+--cursor c_trx (p_trx_number varchar2, p_addr_id number, p_bill_id number) is
+select  customer_trx_id
+       ,bill_to_customer_id
+       ,bill_to_address_id 
+        ,trx.*
+    from ra_customer_trx_all trx
+    where trx.trx_number = '1091'       --p_trx_number
+    and trx.bill_to_customer_id = 1050  --p_bill_id 
+    --and bill_to_address_id = p_addr_id;
+*/
+
+
 DECLARE
 
-  v_trx_number_app_old    ra_customer_trx_all.trx_number%type     :=1091;--INGRESAR LA FACTURA
-  v_retcode   number:=0;
-  retcode   number;
-  v_errores_gral      number:=0;
+--Parametros para ingresar API AR_CM_API_PUB.apply_on_account
+  v_trx_number_app_old    ra_customer_trx_all.trx_number%type     :=1091;    --INGRESAR LA FACTURA QUE ESTE ABIERTA (SE OBTIENE DE LA PANTALLA "DETALLES CUENTA")
+  v_importe_app            number                                 := 100;    --PUEDO METERLO LO QUE SEA
+  l_customer_trx_id       number                                  ;--:=      --DEBE SER EL CONSECUTIVO??;
+  v_customer_trx_id_inv   number                                  := 153604; --customer_trx_id
+  v_org_id                number                                  := 101;    --org_id
 
---Parametros para API
-  v_importe_app            number                                 := 100;--PUEDO METERLO LO QUE SEA
+--VARIABLES QUE NO NECESITAMOS INICIARLIZAR
   v_errbuf                varchar2(1000);
-  l_customer_trx_id       number                                  ;--:= --DEBE SER EL CONSECUTIVO??;
-  v_customer_trx_id_inv   number                                  := 153604;
-  v_org_id                number                                  := 101;
+  v_retcode               number:=0;
+  retcode                 number;
+  v_errores_gral          number:=0;
 
 
 PROCEDURE XXBOL_AR_APPLY_CM_TO_DM (
@@ -63,6 +85,7 @@ BEGIN
 fetch c_importe into v_importe;
 close c_importe;*/
 
+  dbms_output.put_line('---------EJECUTANDO XXBOL_AR_APPLY_CM_TO_DM-------');
 
   dbms_output.put_line('v_importe: '||p_amount);
   dbms_output.put_line('p_cm_customer_trx_id: '||p_cm_customer_trx_id);
@@ -156,9 +179,11 @@ close c_importe;*/
   END IF;
 END XXBOL_AR_APPLY_CM_TO_DM;
 
---*******************AQUI COMIENZA TODO
+--*******************AQUI COMIENZA TODO*******************************************************
+--se envian los parametros al procedimiento  XXBOL_AR_APPLY_CM_TO_DM
+--y este a su vez manda a llamar a AR_CM_API_PUB.apply_on_account
 BEGIN
-
+  dbms_output.put_line('---------EJECUTANDO LA INIACIALIZACION DE PARAMETROS-------');
   dbms_output.put_line('Aplicando nota de credito a factura abierta...');
   dbms_output.put_line('Aplicando el importe => '||v_importe_app||' a la factura => '||v_trx_number_app_old);
   dbms_output.put_line('Aplicando nota de credito a factura abierta...');
