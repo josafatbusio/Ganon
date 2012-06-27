@@ -1,0 +1,104 @@
+DECLARE
+  K_api_version CONSTANT NUMBER := 1;
+  K_init_msg_list CONSTANT VARCHAR2(1) := FND_API.g_false;
+  K_comments CONSTANT ar_receivable_applications.comments%TYPE := 'Test';
+  K_commit CONSTANT VARCHAR2(1) := FND_API.g_false;
+  l_acctd_amount_applied_from ar_receivable_applications_all.
+  acctd_amount_applied_from%TYPE;
+  l_acctd_amount_applied_to ar_receivable_applications_all.
+  acctd_amount_applied_to%TYPE;
+  l_cm_app_rec AR_CM_API_PUB.cm_app_rec_type;
+  l_msg_count NUMBER;
+  l_msg_data VARCHAR2(255);
+  l_out_rec_application_id NUMBER;
+  l_return_status VARCHAR2(1);
+BEGIN
+-- First set the environment of the user submitting the request by submitting
+-- fnd_global.apps_initialize().
+-- The procedure requires three parameters
+-- Fnd_Global.apps_initialize(userId,responsibilityId,applicationId)
+-- replace the following code with correct value as get from sql above
+  Fnd_Global.apps_initialize(&user_Id,responsibility_Id,222)
+
+  l_cm_app_rec.cm_customer_trx_id := &Credit_Memo_Customer_trx_id;
+  l_cm_app_rec.cm_trx_number := null; -- Credit Memo Number
+  l_cm_app_rec.inv_customer_trx_id := &Invoice_Customer_trx_id;
+  l_cm_app_rec.inv_trx_number := null ; -- Invoice Number
+  l_cm_app_rec.installment := null;
+  l_cm_app_rec.applied_payment_schedule_id := null;
+  l_cm_app_rec.amount_applied := &Amount_to_be_applied;
+  l_cm_app_rec.apply_date := TRUNC(SYSDATE);
+  l_cm_app_rec.gl_date := TRUNC(SYSDATE);
+  l_cm_app_rec.inv_customer_trx_line_id := null;
+  l_cm_app_rec.inv_line_number := null;
+  l_cm_app_rec.show_closed_invoices := null;
+  l_cm_app_rec.ussgl_transaction_code := null;
+  l_cm_app_rec.attribute_category := null;
+  l_cm_app_rec.attribute1 :=null ;
+  l_cm_app_rec.attribute2 :=null ;
+  l_cm_app_rec.attribute3 := null ;
+  l_cm_app_rec.attribute4 := null;
+  l_cm_app_rec.attribute5 := null;
+  l_cm_app_rec.attribute6 := null;
+  l_cm_app_rec.attribute7 := null;
+  l_cm_app_rec.attribute8 := null;
+  l_cm_app_rec.attribute9 := null;
+  l_cm_app_rec.attribute10 := null;
+  l_cm_app_rec.attribute11 := null;
+  l_cm_app_rec.attribute12 := null;
+  l_cm_app_rec.attribute13 := null;
+  l_cm_app_rec.attribute14 := null;
+  l_cm_app_rec.attribute15 := null;
+  l_cm_app_rec.global_attribute_category := null;
+  l_cm_app_rec.global_attribute1 := null;
+  l_cm_app_rec.global_attribute2 := null;
+  l_cm_app_rec.global_attribute3 := null;
+  l_cm_app_rec.global_attribute4 := null;
+  l_cm_app_rec.global_attribute5 := null;
+  l_cm_app_rec.global_attribute6 := null;
+  l_cm_app_rec.global_attribute7 := null;
+  l_cm_app_rec.global_attribute8 := null;
+  l_cm_app_rec.global_attribute9 := null;
+  l_cm_app_rec.global_attribute10 := null;
+  l_cm_app_rec.global_attribute11 := null;
+  l_cm_app_rec.global_attribute12 := null;
+  l_cm_app_rec.global_attribute12 := null;
+  l_cm_app_rec.global_attribute14 := null;
+  l_cm_app_rec.global_attribute15 := null;
+  l_cm_app_rec.global_attribute16 := null;
+  l_cm_app_rec.global_attribute17 := null;
+  l_cm_app_rec.global_attribute18 := null;
+  l_cm_app_rec.global_attribute19 := null;
+  l_cm_app_rec.global_attribute20 := null;
+  l_cm_app_rec.comments := K_comments;
+  l_cm_app_rec.called_from := null;
+
+  ar_cm_api_pub.apply_on_account( p_api_version => K_api_version
+  , p_init_msg_list => K_init_msg_list
+  , p_commit => K_commit
+  , p_cm_app_rec => l_cm_app_rec
+  , x_return_status => l_return_status
+  , x_msg_count => l_msg_count
+  , x_msg_data => l_msg_data
+  , x_out_rec_application_id =>
+          l_out_rec_application_id
+  , x_acctd_amount_applied_from =>
+          l_acctd_amount_applied_from
+  , x_acctd_amount_applied_to =>
+          l_acctd_amount_applied_to
+          );
+  dbms_output.put_line('return_status: '||l_return_status);
+  dbms_output.put_line('msg_count: '||l_msg_count);
+  dbms_output.put_line('out_rec_application_id: '||l_out_rec_application_id);
+  dbms_output.put_line('acctd_amount_applied_from: '|| l_acctd_amount_applied_from);
+  dbms_output.put_line('acctd_amount_applied_to: '|| l_acctd_amount_applied_to);
+  IF l_msg_count = 1 THEN
+  dbms_output.put_line(l_msg_data);
+    ELSIF l_msg_count > 1 THEN
+    FOR I IN 1..l_msg_count
+    LOOP
+    dbms_output.put_line(I||'. '||SubStr(FND_MSG_PUB.Get(p_encoded => FND_API.
+    G_FALSE ), 1, 255));
+    END LOOP;
+  END IF;
+END;
