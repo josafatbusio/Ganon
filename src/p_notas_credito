@@ -231,14 +231,15 @@ Estoy obteniendo esta salida si lo ejecuto tal como esta:
 
 ---------EJECUTANDO LA INIACIALIZACION DE PARAMETROS-------
 Aplicando nota de credito a factura abierta...
-Aplicando el importe => 100 a la factura => 1091
+Aplicando el importe => 100 a la factura => 4003
 Aplicando nota de credito a factura abierta...
-Aplicando el importe => 100 a la factura => 1091
-v_customer_trx_id_inv => 153604
+Aplicando el importe => 100 a la factura => 4003
+v_customer_trx_id_inv => 118179
+ l_customer_trx_id=> 169493
 ---------EJECUTANDO XXBOL_AR_APPLY_CM_TO_DM-------
 v_importe: 100
-p_cm_customer_trx_id:
-p_inv_customer_trx_id: 153604
+p_cm_customer_trx_id: 169493
+p_inv_customer_trx_id: 118179
 p_org_id: 101
 return_status: E
 msg_count:
