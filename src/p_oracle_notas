@@ -1,5 +1,4 @@
-/*
-Sample Code to Apply and Unapply On Account Credit Memos using AR_CM_API_PUB API in 11.5.10.2 and R12 [ID 753244.1]
+/*Sample Code to Apply and Unapply On Account Credit Memos using AR_CM_API_PUB API in 11.5.10.2 and R12 [ID 753244.1]
  	Modified 13-MAY-2011     Type SAMPLE CODE     Status PUBLISHED
 In this Document
   Purpose
@@ -92,9 +91,14 @@ BEGIN
 -- The procedure requires three parameters
 -- Fnd_Global.apps_initialize(userId,responsibilityId,applicationId)
 -- replace the following code with correct value as get from sql above
-  Fnd_Global.apps_initialize(&user_Id,responsibility_Id,222)
+  --Fnd_Global.apps_initialize(&user_Id,responsibility_Id,222)
 
-  l_cm_app_rec.cm_customer_trx_id := &Credit_Memo_Customer_trx_id;
+  fnd_global.APPS_INITIALIZE (-1,20678,222,0);--,7121);
+  select ra_customer_trx_s.nextval
+    INTO     l_customer_trx_id
+    from dual;
+
+  l_cm_app_rec.cm_customer_trx_id := l_customer_trx_id;--&Credit_Memo_Customer_trx_id;
   l_cm_app_rec.cm_trx_number := null; -- Credit Memo Number
   l_cm_app_rec.inv_customer_trx_id := &Invoice_Customer_trx_id;
   l_cm_app_rec.inv_trx_number := null ; -- Invoice Number
