@@ -1,0 +1,185 @@
+--Procedimiento de pruebas para aplicar notas de credito
+DECLARE
+
+  v_trx_number_app_old    ra_customer_trx_all.trx_number%type     :=1091;--INGRESAR LA FACTURA
+  v_retcode   number:=0;
+  retcode   number;
+  v_errores_gral      number:=0;
+
+--Parametros para API
+  v_importe_app            number                                 := 100;--PUEDO METERLO LO QUE SEA
+  v_errbuf                varchar2(1000);
+  l_customer_trx_id       number                                  ;--:= --DEBE SER EL CONSECUTIVO??;
+  v_customer_trx_id_inv   number                                  := 153604;
+  v_org_id                number                                  := 101;
+
+
+PROCEDURE XXBOL_AR_APPLY_CM_TO_DM (
+  errbuf                  out varchar2
+,retcode                 out number
+,p_cm_customer_trx_id    in number
+,p_inv_customer_trx_id   in number
+,p_org_id                in number
+,p_amount                in number
+,p_apply_date            in date
+)
+is
+  cursor c_importe is
+  SELECT nvl(aps.AMOUNT_DUE_REMAINING,0)
+    FROM apps.ra_customer_trx_all rct,
+            apps.ra_cust_trx_types_all rca,
+            apps.ar_payment_schedules_all aps
+    WHERE 1=1
+            and rct.org_id =   p_org_id
+            AND rct.cust_trx_type_id = rca.cust_trx_type_id
+            AND rca.org_id = rct.org_id
+            --                      AND rca.TYPE = 'INV'
+            AND aps.customer_trx_id = rct.customer_trx_id
+            and rct.customer_trx_id = p_inv_customer_trx_id;
+
+  K_api_version               CONSTANT NUMBER := 1;
+  K_init_msg_list             CONSTANT VARCHAR2(1) := FND_API.G_FALSE;
+  K_comments                  CONSTANT ar_receivable_applications.comments%TYPE := 'Test';
+  K_commit                    CONSTANT VARCHAR2(1) := FND_API.G_FALSE;
+  l_acctd_amount_applied_from ar_receivable_applications_all.acctd_amount_applied_from%TYPE;
+  l_acctd_amount_applied_to   ar_receivable_applications_all.acctd_amount_applied_to%TYPE;
+  l_cm_app_rec                AR_CM_API_PUB.cm_app_rec_type;
+  l_msg_count                 NUMBER;
+  l_msg_data                  VARCHAR2(255);
+  l_out_rec_application_id    NUMBER;
+  l_return_status             VARCHAR2(1);
+
+  v_importe                   number:=0;
+
+BEGIN
+-- First set the environment of the user submitting the request by submitting
+-- fnd_global.apps_initialize().
+-- The procedure requires three parameters
+-- Fnd_Global.apps_initialize(userId,responsibilityId,applicationId)
+-- replace the following code with correct value as get from sql above
+--Fnd_Global.apps_initialize(1391,50718,222,0,9124);
+
+/*open c_importe;
+fetch c_importe into v_importe;
+close c_importe;*/
+
+
+  dbms_output.put_line('v_importe: '||p_amount);
+  dbms_output.put_line('p_cm_customer_trx_id: '||p_cm_customer_trx_id);
+  dbms_output.put_line('p_inv_customer_trx_id: '||p_inv_customer_trx_id);
+  dbms_output.put_line('p_org_id: '||p_org_id);
+
+  l_cm_app_rec.cm_customer_trx_id             := p_cm_customer_trx_id;--227612;
+  l_cm_app_rec.cm_trx_number                  := null; -- Credit Memo Number
+  l_cm_app_rec.inv_customer_trx_id            := p_inv_customer_trx_id;--227607;
+  l_cm_app_rec.inv_trx_number                 := null ; -- Invoice Number
+--l_cm_app_rec.installment                    := 1;
+--l_cm_app_rec.applied_payment_schedule_id    := 155192;
+  l_cm_app_rec.amount_applied                 := p_amount;--v_importe;--476.83;
+  l_cm_app_rec.apply_date                     := p_apply_date;
+  l_cm_app_rec.gl_date                        := p_apply_date;
+  l_cm_app_rec.inv_customer_trx_line_id       := null;
+  l_cm_app_rec.inv_line_number                := null;
+  l_cm_app_rec.show_closed_invoices           := null;
+  l_cm_app_rec.ussgl_transaction_code         := null;
+  l_cm_app_rec.attribute_category             := null;
+  l_cm_app_rec.attribute1                     :=null ;
+  l_cm_app_rec.attribute2                     :=null ;
+  l_cm_app_rec.attribute3                     := null ;
+  l_cm_app_rec.attribute4                     := null;
+  l_cm_app_rec.attribute5                     := null;
+  l_cm_app_rec.attribute6                     := null;
+  l_cm_app_rec.attribute7                     := null;
+  l_cm_app_rec.attribute8                     := null;
+  l_cm_app_rec.attribute9                     := null;
+  l_cm_app_rec.attribute10                    := null;
+  l_cm_app_rec.attribute11                    := null;
+  l_cm_app_rec.attribute12                    := null;
+  l_cm_app_rec.attribute13                    := null;
+  l_cm_app_rec.attribute14                    := null;
+  l_cm_app_rec.attribute15                    := null;
+  l_cm_app_rec.global_attribute_category      := null;
+  l_cm_app_rec.global_attribute1              := null;
+  l_cm_app_rec.global_attribute2              := null;
+  l_cm_app_rec.global_attribute3              := null;
+  l_cm_app_rec.global_attribute4              := null;
+  l_cm_app_rec.global_attribute5              := null;
+  l_cm_app_rec.global_attribute6              := null;
+  l_cm_app_rec.global_attribute7              := null;
+  l_cm_app_rec.global_attribute8              := null;
+  l_cm_app_rec.global_attribute9              := null;
+  l_cm_app_rec.global_attribute10             := null;
+  l_cm_app_rec.global_attribute11             := null;
+  l_cm_app_rec.global_attribute12             := null;
+  l_cm_app_rec.global_attribute12             := null;
+  l_cm_app_rec.global_attribute14             := null;
+  l_cm_app_rec.global_attribute15             := null;
+  l_cm_app_rec.global_attribute16             := null;
+  l_cm_app_rec.global_attribute17             := null;
+  l_cm_app_rec.global_attribute18             := null;
+  l_cm_app_rec.global_attribute19             := null;
+  l_cm_app_rec.global_attribute20             := null;
+  l_cm_app_rec.comments                       := K_comments;
+  l_cm_app_rec.called_from                    := null;
+
+  AR_CM_API_PUB.apply_on_account(
+  p_api_version                 => K_api_version
+  , p_init_msg_list               => K_init_msg_list
+  , p_commit                      => K_commit
+  , p_cm_app_rec                  => l_cm_app_rec
+  , x_return_status               => l_return_status
+  , x_msg_count                   => l_msg_count
+  , x_msg_data                    => l_msg_data
+  , x_out_rec_application_id      =>   l_out_rec_application_id
+  , x_acctd_amount_applied_from   =>   l_acctd_amount_applied_from
+  , x_acctd_amount_applied_to     =>   l_acctd_amount_applied_to
+          );
+  dbms_output.put_line('return_status: '||l_return_status);
+  dbms_output.put_line('msg_count: '||l_msg_count);
+  dbms_output.put_line('out_rec_application_id: '||l_out_rec_application_id);
+  dbms_output.put_line('acctd_amount_applied_from: '|| l_acctd_amount_applied_from);
+  dbms_output.put_line('acctd_amount_applied_to: '|| l_acctd_amount_applied_to);
+  IF l_msg_count = 1 THEN
+  dbms_output.put_line(l_msg_data);
+  RETCODE:=2;
+    ELSIF l_msg_count > 1 THEN
+    FOR I IN 1..l_msg_count
+    LOOP
+    dbms_output.put_line(I||'. '||SubStr(FND_MSG_PUB.Get(p_encoded => FND_API.G_FALSE ), 1, 255));
+
+    dbms_output.put_line(l_msg_data);
+    END LOOP;
+
+    RETCODE:=2;
+    ELSE
+    RETCODE :=0;
+  END IF;
+END XXBOL_AR_APPLY_CM_TO_DM;
+
+--*******************AQUI COMIENZA TODO
+BEGIN
+
+  dbms_output.put_line('Aplicando nota de credito a factura abierta...');
+  dbms_output.put_line('Aplicando el importe => '||v_importe_app||' a la factura => '||v_trx_number_app_old);
+  dbms_output.put_line('Aplicando nota de credito a factura abierta...');
+  dbms_output.put_line('Aplicando el importe => '||v_importe_app||' a la factura => '||v_trx_number_app_old);
+  dbms_output.put_line('v_customer_trx_id_inv => '||v_customer_trx_id_inv);
+  XXBOL_AR_APPLY_CM_TO_DM (
+  errbuf                  => v_errbuf
+  ,retcode                 => v_retcode
+  ,p_cm_customer_trx_id    => l_customer_trx_id
+  ,p_inv_customer_trx_id   => v_customer_trx_id_inv
+  ,p_org_id                => v_org_id
+  ,p_amount                => round(v_importe_app,2)
+  ,p_apply_date            => sysdate
+          );
+  IF v_RETCODE > 0 THEN
+  dbms_output.put_line('No se hizo la aplicacion del importe');
+  dbms_output.put_line('No se hizo la aplicacion del importe');
+  retcode :=  2;
+  v_errores_gral := v_errores_gral + 1;
+  --raise e_abort;
+  end if;
+
+
+END; --XXBOL_AR_TRANSACTIONS_PRC;
