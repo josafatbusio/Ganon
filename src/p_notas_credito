@@ -32,12 +32,15 @@ select receivable_application_id
 DECLARE
 
 --Parametros para ingresar API AR_CM_API_PUB.apply_on_account
-  v_trx_number_app_old    ra_customer_trx_all.trx_number%type     := 1091;    --INGRESAR LA FACTURA QUE ESTE ABIERTA (SE OBTIENE DE LA PANTALLA "DETALLES CUENTA")
-  v_importe_app            number                                 := 100;    --PUEDO METERLO LO QUE SEA
+  ------------------------------------------------------------
+--Parametros para ingresar API AR_CM_API_PUB.apply_on_account
+  v_trx_number_app_old    ra_customer_trx_all.trx_number%type     := &factura; --4003;--1091;    --INGRESAR LA FACTURA QUE ESTE ABIERTA (SE OBTIENE DE LA PANTALLA "DETALLES CUENTA")
+  v_importe_app            number                                 := &importe; --100;    --PUEDO METERLO LO QUE SEA
   l_customer_trx_id       number                                  ;--:=      --DEBE SER EL CONSECUTIVO??;
-  v_customer_trx_id_inv   number                                  := 153604; --customer_trx_id
-  v_org_id                number                                  := 101;    --org_id
-
+  v_customer_trx_id_inv   number                                  := &customer_trx_id;--118179;--153604; --customer_trx_id
+  v_org_id                number                                  := &org_id;--101;    --org_id
+---------------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------------
 --VARIABLES QUE NO NECESITAMOS INICIARLIZAR
   v_errbuf                varchar2(1000);
   v_retcode               number:=0;
