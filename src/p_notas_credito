@@ -5,7 +5,7 @@ PARA PROBAR ESTE PROCEDIMIENTO ES NECESARIO INGRESAR LOS PARAMETROS
     v_importe_app 
     l_customer_trx_id 
     v_customer_trx_id_inv
-    v_org_id 
+    v_org_id
     
 QUERY PARA OBTENER EL customer_trx_id  EL org_id Y SUSTITUIRLOS EN v_customer_trx_id_inv Y EN v_org_id 
 --cursor c_trx (p_trx_number varchar2, p_addr_id number, p_bill_id number) is
@@ -17,6 +17,16 @@ select  customer_trx_id
     where trx.trx_number = '1091'       --p_trx_number
     and trx.bill_to_customer_id = 1050  --p_bill_id 
     --and bill_to_address_id = p_addr_id;
+
+
+    --To find the receivable_application_id of the Application line which is joining Credit Memo and Invoice is
+
+select receivable_application_id
+       ,ar.*
+    from ar_receivable_applications_all ar
+    where 1=1
+    --and customer_trx_id= 153604--&Credit_Memo_Customer_trx_id
+    --and applied_customer_trx_id= 153604--&Invoice_Customer_trx_id;
 */
 
 
