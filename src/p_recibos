@@ -1,0 +1,37 @@
+--Ejemplo de archivo
+--05/05/2012|7529.29000|0000430553|LE00000385|013070|R0244287|108_FRANQUICIA LEON|CG FRQ|EFECTIVO|MXN|1|108|7529.29000|
+--05/05/2012|5500.35000|0000431397|230244|006372|R0244306|109_FRANQUICIA MEDRANO|CG FRQ|EFECTIVO|MXN|1|109|5500.35000|
+
+DECLARE
+
+v_cheque:=null; 					      --se obtiene de el tercer parametro del archivo
+v_importe:=null; 					      --se obtiene del segundo parametro del archivo
+  l_cr_id              number;
+v_payment_date:=null;				       -- es el primer parametro del archivo
+  l_return_status     VARCHAR2 (1);
+  l_msg_data_out      VARCHAR2 (240);
+v_moneda    :=null;					      --decimo parametro del archivo
+  v_exchange_rate_type varchar2(200);       --null o USER
+v_tipo_cambio:=null;						--onceavo parametro del archivo
+
+BEGIN
+  ar_receipt_api_pub.create_cash
+          (p_api_version                 => 1.0, --
+          p_init_msg_list               => fnd_api.g_true, --
+          p_receipt_number              => v_cheque, --
+          p_amount                      => v_importe, --
+          p_receipt_method_id           => reg_metodo.receipt_method_id,
+          p_remittance_bank_account_id  => reg_account.REMIT_BANK_ACCT_USE_ID,
+          p_customer_number             => reg_trx.ACCOUNT_NUMBER,
+          p_cr_id                       => l_cr_id, --
+          p_receipt_date                => v_payment_date, --
+          p_gl_date                     => v_payment_date, --
+          x_return_status               => l_return_status, --
+          x_msg_count                   => l_msg_count, --
+          x_msg_data                    => l_msg_data, --
+          p_currency_code               => v_moneda, --
+          p_exchange_rate_type          => v_exchange_rate_type, --
+          p_exchange_rate               => v_tipo_cambio, --
+          p_org_id                      => reg_libro.uo    --ver cque valor va aqui
+          );
+END;
