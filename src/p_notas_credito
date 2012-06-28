@@ -92,6 +92,7 @@ BEGIN
 -- Fnd_Global.apps_initialize(userId,responsibilityId,applicationId)
 -- replace the following code with correct value as get from sql above
 --Fnd_Global.apps_initialize(1391,50718,222,0,9124);
+  fnd_global.APPS_INITIALIZE (-1,20678,222,0);--,7121);
 
 /*open c_importe;
 fetch c_importe into v_importe;
@@ -157,6 +158,18 @@ close c_importe;*/
   l_cm_app_rec.comments                       := K_comments;
   l_cm_app_rec.called_from                    := null;
 
+  dbms_output.put_line('-----Parametros enviados a  AR_CM_API_PUB.apply_on_account------');
+  dbms_output.put_line('K_api_version='||K_api_version);
+  dbms_output.put_line('K_init_msg_list='||K_init_msg_list);
+  dbms_output.put_line('K_commit='||K_commit);
+  --dbms_output.put_line('l_cm_app_rec='||l_cm_app_rec);
+  dbms_output.put_line('l_return_status='||l_return_status);
+  dbms_output.put_line('l_msg_count='||l_msg_count);
+  dbms_output.put_line('l_msg_data='||l_msg_data);
+  dbms_output.put_line('l_out_rec_application_id='||l_out_rec_application_id);
+  dbms_output.put_line('l_acctd_amount_applied_from='||l_acctd_amount_applied_from);
+  dbms_output.put_line('l_acctd_amount_applied_to='||l_acctd_amount_applied_to);
+
   AR_CM_API_PUB.apply_on_account(
   p_api_version                 => K_api_version
   , p_init_msg_list               => K_init_msg_list
@@ -169,7 +182,7 @@ close c_importe;*/
   , x_acctd_amount_applied_from   =>   l_acctd_amount_applied_from
   , x_acctd_amount_applied_to     =>   l_acctd_amount_applied_to
           );
-  dbms_output.put_line('return_status: '||l_return_status);
+  dbms_output.put_line('********** return_status: '||l_return_status);
   dbms_output.put_line('msg_count: '||l_msg_count);
   dbms_output.put_line('out_rec_application_id: '||l_out_rec_application_id);
   dbms_output.put_line('acctd_amount_applied_from: '|| l_acctd_amount_applied_from);
@@ -217,6 +230,7 @@ BEGIN
   ,p_amount                => round(v_importe_app,2)
   ,p_apply_date            => sysdate
           );
+  dbms_output.put_line('v_RETCODE='||v_RETCODE);
   IF v_RETCODE > 0 THEN
   dbms_output.put_line('No se hizo la aplicacion del importe');
   dbms_output.put_line('No se hizo la aplicacion del importe');
@@ -232,22 +246,23 @@ END; --XXBOL_AR_TRANSACTIONS_PRC;
 /*
 Estoy obteniendo esta salida si lo ejecuto tal como esta:
 
----------EJECUTANDO LA INIACIALIZACION DE PARAMETROS-------
+---------EJECUTANDO LA INICIALIZACION DE PARAMETROS-------
 Aplicando nota de credito a factura abierta...
-Aplicando el importe => 100 a la factura => 4003
+Aplicando el importe => 100 a la factura => 1091
 Aplicando nota de credito a factura abierta...
-Aplicando el importe => 100 a la factura => 4003
-v_customer_trx_id_inv => 118179
- l_customer_trx_id=> 169493
+Aplicando el importe => 100 a la factura => 1091
+v_customer_trx_id_inv => 153604
+ l_customer_trx_id=> 170492
 ---------EJECUTANDO XXBOL_AR_APPLY_CM_TO_DM-------
 v_importe: 100
-p_cm_customer_trx_id: 169493
-p_inv_customer_trx_id: 118179
+p_cm_customer_trx_id: 170492
+p_inv_customer_trx_id: 153604
 p_org_id: 101
-return_status: E
+********** return_status: E
 msg_count:
 out_rec_application_id:
 acctd_amount_applied_from:
 acctd_amount_applied_to:
+v_RETCODE=0
 
 */
