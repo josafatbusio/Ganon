@@ -241,10 +241,10 @@ select 1
 
 reg_exists c_trx_exists%rowtype;
 
-CURSOR seq_trx is
+/*CURSOR seq_trx is
   SELECT  ra_customer_trx_s.nextval
     INTO l_customer_trx_id
-  from dual;
+  from dual;*/
 
 v_trx_number_new        ra_customer_trx_all.trx_number%type;
 
@@ -739,6 +739,10 @@ commit;*/
   l_customer_trx_id := null;
   l_return_status := null;
 
+  SELECT  ra_customer_trx_s.nextval
+    INTO l_customer_trx_id
+    from dual;
+  dbms_output.put_line( 'l_customer_trx_id= '|| l_customer_trx_id);
   /*delete from ar_trx_errors_gt;
 
 delete from ar_trx_header_tmp_gt;
