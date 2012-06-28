@@ -1,0 +1,15 @@
+Estuvimos revisando como aplicar una nota de crédito a una factura y ya vimos que se puede utilizando una  API.
+Te describo los parámetros mínimos que serian necesarios para que se incluyan en un archivo:
+
+•	NUMERO DE FACTURA
+•	IMPORTE PARA SER APLICADO
+•	CLIENTE
+•	ORG_ID
+•	FECHA DE APLICACION
+
+Un layout propuesto podría ser de la siguiente manera:
+
+               NUMERO_FACTURA|IMPORTE|CLIENTE|ORG_ID|FECHA_APLICACION
+
+En donde cada valor seria  separado por un caracter  ‘|’.
+
